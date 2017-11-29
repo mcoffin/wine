@@ -42,6 +42,7 @@
 #include "winternl.h"
 #include "wine/library.h"
 #include "wine/debug.h"
+#include "lol_hack.h"
 
 #ifdef SONAME_LIBGL
 
@@ -435,19 +436,19 @@ static const GLubyte *wglGetString(GLenum name);
 /* check if the extension is present in the list */
 static BOOL has_extension( const char *list, const char *ext )
 {
-    size_t len = strlen( ext );
-
-    while (list)
-    {
-        while (*list == ' ') list++;
-        if (!strncmp( list, ext, len ) && (!list[len] || list[len] == ' ')) return TRUE;
-        list = strchr( list, ' ' );
-    }
-    return FALSE;
+    return glxdrv_has_extension(list, ext);
 }
+
+#define GLXErrorHandler_BUFLEN (1024)
 
 static int GLXErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 {
+    char buf[GLXErrorHandler_BUFLEN];
+    memset(buf, 0, GLXErrorHandler_BUFLEN);
+    XGetErrorText(dpy, event->error_code, buf, GLXErrorHandler_BUFLEN);
+
+    TRACE("GLX Error: %s\n", buf);
+
     /* In the future we might want to find the exact X or GLX error to report back to the app */
     return 1;
 }
@@ -780,13 +781,14 @@ static BOOL has_opengl(void)
 
 static const char *debugstr_fbconfig( GLXFBConfig fbconfig )
 {
-    int id, visual, drawable;
+    int id, visual, drawable, swap_method;
 
     if (pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_FBCONFIG_ID, &id ))
         return "*** invalid fbconfig";
     pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_VISUAL_ID, &visual );
     pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_DRAWABLE_TYPE, &drawable );
-    return wine_dbg_sprintf( "fbconfig %#x visual id %#x drawable type %#x", id, visual, drawable );
+    pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_SWAP_METHOD_OML, &swap_method );
+    return wine_dbg_sprintf( "fbconfig %#x visual id %#x drawable type %#x swap method %#x", id, visual, drawable, swap_method );
 }
 
 static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, struct wgl_pbuffer* pbuf) {
@@ -864,7 +866,7 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, struct wgl_
       case WGL_TYPE_RGBA_FLOAT_ATI: pixelattrib = GLX_RGBA_FLOAT_BIT; break ;
       case WGL_TYPE_RGBA_UNSIGNED_FLOAT_EXT: pixelattrib = GLX_RGBA_UNSIGNED_FLOAT_BIT_EXT; break ;
       default:
-        ERR("unexpected PixelType(%x)\n", pop);	
+        ERR("unexpected PixelType(%x)\n", pop);    
         pop = 0;
       }
       break;
@@ -886,7 +888,8 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, struct wgl_
       TRACE("pAttr[%d] = WGL_DRAW_TO_WINDOW_ARB: %d\n", cur, pop);
       /* GLX_DRAWABLE_TYPE flags need to be OR'd together. See below. */
       if (pop) {
-        drawattrib |= GLX_WINDOW_BIT;
+          PUSH2(oGLXAttr, GLX_X_RENDERABLE, GL_TRUE);
+          drawattrib |= GLX_WINDOW_BIT;
       }
       break;
 
@@ -902,6 +905,8 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, struct wgl_
     case WGL_ACCELERATION_ARB:
       /* This flag is set in a pixel format */
       pop = iWGLAttr[++cur];
+      if (pop == WGL_FULL_ACCELERATION_ARB)
+          PUSH2(oGLXAttr, GLX_CONFIG_CAVEAT, GLX_NONE);
       TRACE("pAttr[%d] = WGL_ACCELERATION_ARB: %d\n", cur, pop);
       break;
 
@@ -1073,7 +1078,7 @@ static void init_pixel_formats( Display *display )
 {
     struct wgl_pixel_format *list;
     int size = 0, onscreen_size = 0;
-    int fmt_id, nCfgs, i, run, bmp_formats;
+    int fmt_id, nCfgs, i, run, bmp_formats, swap_method, swap_method_ret;
     GLXFBConfig* cfgs;
     XVisualInfo *visinfo;
 
@@ -1126,6 +1131,9 @@ static void init_pixel_formats( Display *display )
                 }
 
                 TRACE("Found onscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", fmt_id, size+1, i);
+        swap_method = 0;
+        swap_method_ret = pglXGetFBConfigAttrib(display, cfgs[i], GLX_SWAP_METHOD_OML, &swap_method);
+        TRACE("FBCONFIG_ID 0x%x swap method %#x (%d)\n", fmt_id, swap_method, swap_method_ret); 
                 list[size].fbconfig = cfgs[i];
                 list[size].fmt_id = fmt_id;
                 list[size].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
@@ -1770,7 +1778,7 @@ static int glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
 }
 
 /***********************************************************************
- *		glxdrv_wglGetPixelFormat
+ *        glxdrv_wglGetPixelFormat
  */
 static int glxdrv_wglGetPixelFormat( HDC hdc )
 {
@@ -1790,7 +1798,7 @@ static int glxdrv_wglGetPixelFormat( HDC hdc )
 }
 
 /***********************************************************************
- *		glxdrv_wglSetPixelFormat
+ *        glxdrv_wglSetPixelFormat
  */
 static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
 {
@@ -1798,7 +1806,7 @@ static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORM
 }
 
 /***********************************************************************
- *		glxdrv_wglCopyContext
+ *        glxdrv_wglCopyContext
  */
 static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
 {
@@ -1811,7 +1819,7 @@ static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *d
 }
 
 /***********************************************************************
- *		glxdrv_wglCreateContext
+ *        glxdrv_wglCreateContext
  */
 static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
 {
@@ -1838,7 +1846,7 @@ static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
 }
 
 /***********************************************************************
- *		glxdrv_wglDeleteContext
+ *        glxdrv_wglDeleteContext
  */
 static BOOL glxdrv_wglDeleteContext(struct wgl_context *ctx)
 {
@@ -1863,7 +1871,7 @@ static BOOL glxdrv_wglDeleteContext(struct wgl_context *ctx)
 }
 
 /***********************************************************************
- *		glxdrv_wglGetProcAddress
+ *        glxdrv_wglGetProcAddress
  */
 static PROC glxdrv_wglGetProcAddress(LPCSTR lpszProc)
 {
@@ -1872,7 +1880,7 @@ static PROC glxdrv_wglGetProcAddress(LPCSTR lpszProc)
 }
 
 /***********************************************************************
- *		glxdrv_wglMakeCurrent
+ *        glxdrv_wglMakeCurrent
  */
 static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
 {
@@ -1921,7 +1929,7 @@ done:
 }
 
 /***********************************************************************
- *		X11DRV_wglMakeContextCurrentARB
+ *        X11DRV_wglMakeContextCurrentARB
  */
 static BOOL X11DRV_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct wgl_context *ctx )
 {
@@ -1964,7 +1972,7 @@ done:
 }
 
 /***********************************************************************
- *		glxdrv_wglShareLists
+ *        glxdrv_wglShareLists
  */
 static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
@@ -2066,7 +2074,7 @@ static const GLubyte *wglGetString(GLenum name)
 }
 
 /***********************************************************************
- *		X11DRV_wglCreateContextAttribsARB
+ *        X11DRV_wglCreateContextAttribsARB
  */
 static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wgl_context *hShareContext,
                                                               const int* attribList )
@@ -2074,6 +2082,7 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
     struct wgl_context *ret;
     struct gl_drawable *gl;
     int err = 0;
+    int major, minor;
 
     TRACE("(%p %p %p)\n", hdc, hShareContext, attribList);
 
@@ -2135,6 +2144,15 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
                 }
                 attribList += 2;
             }
+	    glxdrv_apply_version_hack(&ret->attribList[0]);
+	    int *alist = &ret->attribList[0];
+	    while (alist[0] != 0) {
+		    TRACE("glx attrib %#x -> %#x\n", alist[0], alist[1]);
+		    alist = &alist[2];
+	    }
+	    major = glxdrv_attrib_list_get(GLX_CONTEXT_MAJOR_VERSION_ARB, &ret->attribList[0]);
+	    minor = glxdrv_attrib_list_get(GLX_CONTEXT_MINOR_VERSION_ARB, &ret->attribList[0]);
+	    TRACE("GLX_CONTEXT_VERSION: %d.%d\n", major, minor);
         }
 
         X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
@@ -2739,7 +2757,7 @@ static BOOL X11DRV_wglGetPixelFormatAttribivARB( HDC hdc, int iPixelFormat, int 
             case WGL_BIND_TO_TEXTURE_RGBA_ARB:
                 if (!use_render_texture_emulation) {
                     piValues[i] = GL_FALSE;
-                    continue;	
+                    continue;    
                 }
                 curGLXAttr = GLX_RENDER_TYPE;
                 if (!fmt) goto pix_error;

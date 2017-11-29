@@ -152,6 +152,7 @@ case $host in
       host_cpu="i386"
       notice_platform="32-bit "
       AC_SUBST(TARGETFLAGS,"-m32")
+      AC_SUBST(RUSTC_TARGET,"i686-unknown-linux-gnu")
       PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/pkgconfig}
       export PKG_CONFIG_PATH
       enable_win16=${enable_win16:-yes}
@@ -169,6 +170,7 @@ case $host in
       host_cpu="x86_64"
       notice_platform="64-bit "
       AC_SUBST(TARGETFLAGS,"-m64")
+      AC_SUBST(RUSTC_TARGET,"x86_64-unknown-linux-gnu")
     fi
     ;;
   arm*)
