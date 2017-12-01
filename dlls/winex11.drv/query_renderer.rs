@@ -22,6 +22,7 @@ mod glx {
     }
 }
 
+#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ProfileVersion {
     pub major: c_int,

@@ -589,6 +589,8 @@ static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
     int error_base, event_base;
     unsigned int i;
 
+    glxdrv_init_lol();
+
     /* No need to load any other libraries as according to the ABI, libGL should be self-sufficient
        and include all dependencies */
     opengl_handle = wine_dlopen(SONAME_LIBGL, RTLD_NOW|RTLD_GLOBAL, buffer, sizeof(buffer));
@@ -3158,6 +3160,14 @@ static BOOL X11DRV_wglQueryRendererIntegerWINE( HDC dc, GLint renderer, GLenum a
 static const char *X11DRV_wglQueryRendererStringWINE( HDC dc, GLint renderer, GLenum attribute )
 {
     return pglXQueryRendererStringMESA( gdi_display, DefaultScreen(gdi_display), renderer, attribute );
+}
+
+void glxdrv_trace(const char *stuff) {
+    TRACE("%s\n", stuff);
+}
+
+DWORD glxdrv_current_exe(unsigned int size, LPSTR buffer) {
+    return GetModuleFileNameA(NULL, buffer, size);
 }
 
 /**

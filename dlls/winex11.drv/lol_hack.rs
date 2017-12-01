@@ -3,19 +3,27 @@
 extern crate core;
 
 mod query_renderer;
+mod wine;
 
 use core::nonzero::NonZero;
+use std::borrow::Borrow;
 use std::env;
 use std::ffi::CStr;
 use std::os::raw::*;
 use std::slice;
 use query_renderer::{ ProfileVersion, QueryRenderer };
 
-const GLX_CONTEXT_PROFILE_MASK_ARB: c_int = 0x9126;
-const GLX_CONTEXT_MAJOR_VERSION_ARB: c_int = 0x2091;
-const GLX_CONTEXT_MINOR_VERSION_ARB: c_int = 0x2092;
-const GLX_CONTEXT_CORE_PROFILE_BIT_ARB: c_int = 0b1;
-const GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB: c_int = 0b10;
+#[allow(dead_code)]
+mod glx_c {
+    use std::os::raw::*;
+    pub const GLX_CONTEXT_PROFILE_MASK_ARB: c_int = 0x9126;
+    pub const GLX_CONTEXT_MAJOR_VERSION_ARB: c_int = 0x2091;
+    pub const GLX_CONTEXT_MINOR_VERSION_ARB: c_int = 0x2092;
+    pub const GLX_CONTEXT_CORE_PROFILE_BIT_ARB: c_int = 0b1;
+    pub const GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB: c_int = 0b10;
+}
+
+use glx_c::*;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -29,6 +37,11 @@ impl Attrib {
     fn key(self) -> c_int {
         self.key.get()
     }
+
+    #[inline(always)]
+    fn set(&mut self, value: c_int) {
+        self.value = value;
+    }
 }
 
 pub struct AttribList<'a>(Option<&'a mut Option<Attrib>>);
@@ -37,6 +50,11 @@ impl<'a> AttribList<'a> {
     #[inline(always)]
     fn get(mut self, key: c_int) -> Option<&'a mut Attrib> {
         self.find(|attr| attr.key() == key)
+    }
+
+    #[inline(always)]
+    fn set(self, key: c_int, value: c_int) -> bool {
+        self.get(key).map(|a| a.set(value)).is_some()
     }
 }
 
@@ -71,6 +89,37 @@ impl<T> FilterOption<T> for Option<T> {
     }
 }
 
+trait OrDefault<T> {
+    fn or_default(self) -> T;
+}
+
+impl<T: Default> OrDefault<T> for Option<T> {
+    fn or_default(self) -> T {
+        self.unwrap_or_else(Default::default)
+    }
+}
+
+enum HackMethod {
+    GiveCompat,
+    GiveCore,
+}
+
+impl HackMethod {
+    fn get() -> HackMethod {
+        env::var("WINE_X11DRV_LOL_HACK_METHOD").ok().and_then(|s| match s.as_str() {
+            "compat" => Some(HackMethod::GiveCompat),
+            "core" => Some(HackMethod::GiveCore),
+            _ => None,
+        }).or_default()
+    }
+}
+
+impl Default for HackMethod {
+    fn default() -> HackMethod {
+        HackMethod::GiveCompat
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn glxdrv_apply_version_hack(attribs: &mut Option<Attrib>) {
     let major = AttribList(Some(attribs)).get(GLX_CONTEXT_MAJOR_VERSION_ARB)
@@ -84,27 +133,37 @@ pub unsafe extern "C" fn glxdrv_apply_version_hack(attribs: &mut Option<Attrib>)
         }),
         _ => None,
     };
-    let mut should_continue = profile_version
-        .and_then(|pv| QueryRenderer::load().map(|qr| (qr, pv)))
-        .map(|(qr, pv)| qr.max_compatibility_profile_version() < pv)
-        .unwrap_or(true);
-    should_continue = should_continue || env::var("WINE_X11DRV_OVERRIDE_LOL").is_ok();
-    if !should_continue {
-        return;
-    }
+    let qr_ext = QueryRenderer::load();
     let profile = AttribList(Some(attribs))
         .get(GLX_CONTEXT_PROFILE_MASK_ARB)
-        .filter_opt(|attr| (attr.value & GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB) != 0);
-    if let Some(profile) = profile {
-        let mut set_core = || {
-            profile.value = GLX_CONTEXT_CORE_PROFILE_BIT_ARB;
-        };
-        match (major, minor) {
-            (Some(3), Some(minor)) if minor > 0 => set_core(),
-            (Some(major), _) if major > 3 => set_core(),
-            _ => {},
-        }
-    }
+        .map(|attr| attr.value)
+        .filter_opt(|v| (v & GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB) != 0);
+    let mesa_override = env::var("MESA_GL_VERSION_OVERRIDE");
+    //wine::trace(format!("MESA_GL_VERSION_OVERRIDE = {:?}", &mesa_override));
+    //wine::trace(format!("QueryRenderer: {:?}", qr_ext.is_some()));
+    profile_version
+        .and_then(|pv| qr_ext.map(|qr| (qr.max_compatibility_profile_version(), pv)))
+        .map(|(qr, pv)| if mesa_override.is_ok() {
+            let qr = ProfileVersion::new(3, 0);
+            (qr, pv)
+        } else {
+            (qr, pv)
+        }).filter_opt(|&(qr, pv)| qr < pv)
+        .and_then(|(qr, _)| profile.map(|profile| (qr, profile)))
+        .map(|(qr, _)| {
+            match HackMethod::get() {
+                HackMethod::GiveCompat => {
+                    AttribList(Some(attribs))
+                        .set(GLX_CONTEXT_MAJOR_VERSION_ARB, qr.major);
+                    AttribList(Some(attribs))
+                        .set(GLX_CONTEXT_MINOR_VERSION_ARB, qr.minor);
+                },
+                HackMethod::GiveCore => {
+                    AttribList(Some(attribs))
+                        .set(GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB);
+                },
+            }
+        });
 }
 
 #[no_mangle]
@@ -130,6 +189,16 @@ pub extern "C" fn glxdrv_has_extension(list: *const c_char, ext: *const c_char) 
         CStr::from_ptr(ext).to_str().unwrap()
     };
     has_extension(list, ext) as c_int
+}
+
+#[no_mangle]
+pub extern "C" fn glxdrv_init_lol() {
+    match wine::current_exe().ok().as_ref().and_then(|s| s.split("\\").last()) {
+        Some("League of Legends.exe") => {
+            env::set_var("MESA_GL_VERSION_OVERRIDE", "3.2COMPAT");
+        },
+        name => wine::trace(format!("Executable: {:?}", name)),
+    }
 }
 
 #[cfg(test)]
