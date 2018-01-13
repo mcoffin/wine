@@ -2612,8 +2612,24 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             else ret = STATUS_INFO_LENGTH_MISMATCH;
         }
         break;
+    case SystemCodeIntegrityInformation:
+        {
+            len = sizeof(SYSTEM_CODEINTEGRITY_INFORMATION);
+            if (Length >= len)
+            {
+                if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
+                else {
+                    // FIXME: Lie so anti-cheat software will load
+                    FIXME("Lying about codeintegrity information so anti-cheat software will load\n");
+                    ((SYSTEM_CODEINTEGRITY_INFORMATION *)SystemInformation)->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
+                }
+            } else {
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
+        }
+        break;
     default:
-	FIXME("(0x%08x,%p,0x%08x,%p) stub\n",
+        FIXME("(0x%08x,%p,0x%08x,%p) stub\n",
 	      SystemInformationClass,SystemInformation,Length,ResultLength);
 
         /* Several Information Classes are not implemented on Windows and return 2 different values 
