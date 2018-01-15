@@ -603,7 +603,7 @@
 @ stub KeRemoveSystemServiceTable
 @ stdcall KeResetEvent(ptr)
 @ stub KeRestoreFloatingPointState
-@ stub KeRevertToUserAffinityThread
+@ stdcall KeRevertToUserAffinityThread(long)
 @ stub KeRundownQueue
 @ stub KeSaveFloatingPointState
 @ stub KeSaveStateForHibernate
@@ -869,7 +869,7 @@
 @ stub PsGetProcessExitProcessCalled
 @ stub PsGetProcessExitStatus
 @ stub PsGetProcessExitTime
-@ stub PsGetProcessId
+@ stdcall PsGetProcessId(ptr)
 @ stub PsGetProcessImageFileName
 @ stub PsGetProcessInheritedFromUniqueProcessId
 @ stub PsGetProcessJob

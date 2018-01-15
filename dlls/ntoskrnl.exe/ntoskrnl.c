@@ -46,6 +46,8 @@
 
 #include "wine/rbtree.h"
 
+#include "ntoskrnl_private.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(plugplay);
@@ -796,6 +798,7 @@ PMDL WINAPI IoAllocateMdl( PVOID va, ULONG length, BOOLEAN secondary, BOOLEAN ch
         return NULL;
 
     MmInitializeMdl( mdl, va, length );
+    mdl->Process = IoGetCurrentProcess();
 
     if (!irp) return mdl;
 
@@ -1855,13 +1858,16 @@ NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING Redi
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static EPROCESS_INTERNAL IoCurrentProcess;
+
 /***********************************************************************
  *           IoGetCurrentProcess / PsGetCurrentProcess   (NTOSKRNL.EXE.@)
  */
 PEPROCESS WINAPI IoGetCurrentProcess(void)
 {
-    FIXME("() stub\n");
-    return NULL;
+    FIXME("() be-hack\n");
+    IoCurrentProcess.ProcessID = PsGetCurrentProcessId();
+    return (PEPROCESS)&IoCurrentProcess;
 }
 
 /***********************************************************************
@@ -2081,6 +2087,14 @@ VOID WINAPI KeSetSystemAffinityThread(KAFFINITY Affinity)
 }
 
 /***********************************************************************
+ *           KeSetSystemAffinityThread   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI KeRevertToUserAffinityThread(KAFFINITY Affinity)
+{
+    FIXME("(%lx) stub\n", Affinity);
+}
+
+/***********************************************************************
  *           KeWaitForSingleObject   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI KeWaitForSingleObject(PVOID Object,
@@ -2223,10 +2237,49 @@ PVOID WINAPI MmMapLockedPages(PMDL MemoryDescriptorList, KPROCESSOR_MODE AccessM
 /***********************************************************************
  *           MmMapLockedPagesSpecifyCache  (NTOSKRNL.EXE.@)
  */
-PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX MemoryDescriptorList, KPROCESSOR_MODE AccessMode, MEMORY_CACHING_TYPE CacheType,
+PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX mdl, KPROCESSOR_MODE AccessMode, MEMORY_CACHING_TYPE CacheType,
                                            PVOID BaseAddress, ULONG BugCheckOnFailure, MM_PAGE_PRIORITY Priority)
 {
-    FIXME("(%p, %u, %u, %p, %u, %u): stub\n", MemoryDescriptorList, AccessMode, CacheType, BaseAddress, BugCheckOnFailure, Priority);
+    PVOID *addr;
+    PVOID *storeAddr = (PVOID *)((char *)mdl + sizeof(MDL));
+    HANDLE hProcess = NULL;
+    EPROCESS_INTERNAL *mdlProc = (EPROCESS_INTERNAL *)mdl->Process;
+
+    FIXME("(%p, %u, %u, %p, %u, %u): be-hack\n", mdl, AccessMode, CacheType, BaseAddress, BugCheckOnFailure, Priority);
+
+    if (!mdl) return NULL;
+    if (AccessMode) {
+        FIXME("UserMode access not implemented!\n");
+        return NULL;
+    }
+
+    if (BaseAddress) {
+        addr = (PVOID *)BaseAddress;
+    } else {
+        addr = HeapAlloc(GetProcessHeap(), 0, mdl->ByteCount);
+        if (!addr) {
+            ERR("Allocation failure!\n");
+            return NULL;
+        }
+    }
+
+    hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD)mdlProc->ProcessID);
+    if (hProcess) {
+        if (ReadProcessMemory(hProcess, (char *)mdl->StartVa + mdl->ByteOffset, addr, mdl->ByteCount, NULL)) {
+            storeAddr = (PVOID *)((char *) mdl + sizeof(MDL));
+            *storeAddr = addr;
+            CloseHandle(hProcess);
+            TRACE("Success!\n");
+            return addr;
+        } else {
+            WARN("ReadProcessMemory failure!\n");
+        }
+    } else {
+        WARN("OpenProcess failure!\n");
+    }
+
+    if (hProcess) CloseHandle(hProcess);
+    HeapFree(GetProcessHeap(), 0, addr);
 
     return NULL;
 }
@@ -2270,9 +2323,29 @@ void WINAPI MmResetDriverPaging(PVOID AddrInSection)
 /***********************************************************************
  *           MmUnlockPages  (NTOSKRNL.EXE.@)
  */
-void WINAPI  MmUnlockPages(PMDLX MemoryDescriptorList)
+void WINAPI  MmUnlockPages(PMDLX mdl)
 {
-    FIXME("(%p): stub\n", MemoryDescriptorList);
+    PVOID *addr;
+    HANDLE hProcess;
+    PVOID *storeAddr = (PVOID *)((char *)mdl + sizeof(MDL));
+    EPROCESS_INTERNAL *mdlProc = (EPROCESS_INTERNAL *)mdl->Process;
+
+    FIXME("(%p): be-hack\n", mdl);
+
+    addr = *storeAddr;
+    if (!addr) return;
+    hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD)mdlProc->ProcessID);
+    if (hProcess) {
+        if (!WriteProcessMemory(hProcess, (char *)mdl->StartVa + mdl->ByteOffset, addr, mdl->ByteCount, NULL)) {
+            WARN("WriteProcessMemory failure!\n");
+        }
+        CloseHandle(hProcess);
+    } else {
+        WARN("OpenProcess failure!\n");
+    }
+    HeapFree(GetProcessHeap(), 0, addr);
+    *storeAddr = NULL;
+    TRACE("Success!\n");
 }
 
 
@@ -3387,4 +3460,14 @@ PKEVENT WINAPI IoCreateNotificationEvent(UNICODE_STRING *name, HANDLE *handle)
 {
     FIXME( "stub: %s %p\n", debugstr_us(name), handle );
     return NULL;
+}
+
+
+/***********************************************************************
+ *           PsGetProcessId (NTOSKRNL.EXE.@)
+ */
+HANDLE WINAPI PsGetProcessId(PEPROCESS Process)
+{
+    EPROCESS_INTERNAL *iProcess = (EPROCESS_INTERNAL *)Process;
+    return iProcess->ProcessID;
 }
