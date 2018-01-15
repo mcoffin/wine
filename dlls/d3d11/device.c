@@ -6654,8 +6654,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device *
             /* We lie about the threading support to make Tomb Raider 2013 and
              * Deus Ex: Human Revolution happy. */
             FIXME("Returning fake threading support data.\n");
-            threading_data->DriverConcurrentCreates = TRUE;
-            threading_data->DriverCommandLists = TRUE;
+            //threading_data->DriverConcurrentCreates = TRUE;
+            //threading_data->DriverCommandLists = TRUE;
             return S_OK;
         }
 
