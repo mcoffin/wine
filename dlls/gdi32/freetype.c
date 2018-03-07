@@ -996,18 +996,23 @@ static BOOL is_hinting_enabled(void)
 
 static BOOL is_subpixel_rendering_enabled( void )
 {
-#ifdef FT_LCD_FILTER_H
     static int enabled = -1;
     if (enabled == -1)
     {
-        enabled = (pFT_Library_SetLcdFilter &&
-                   pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature);
+        /* >= 2.8.1 provides LCD rendering without filters */
+        if (FT_Version.major > 2 ||
+            FT_Version.major == 2 && FT_Version.minor > 8 ||
+            FT_Version.major == 2 && FT_Version.minor == 8 && FT_Version.patch >= 1)
+            enabled = TRUE;
+#ifdef FT_LCD_FILTER_H
+        else if (pFT_Library_SetLcdFilter &&
+                 pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature)
+            enabled = TRUE;
+#endif
+        else enabled = FALSE;
         TRACE("subpixel rendering is %senabled\n", enabled ? "" : "NOT ");
     }
     return enabled;
-#else
-    return FALSE;
-#endif
 }
 
 
@@ -7266,7 +7271,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     case WINE_GGO_HBGR_BITMAP:
     case WINE_GGO_VRGB_BITMAP:
     case WINE_GGO_VBGR_BITMAP:
-#ifdef FT_LCD_FILTER_H
       {
         switch (ft_face->glyph->format)
         {
@@ -7352,8 +7356,11 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             if ( needsTransform )
                 pFT_Outline_Transform (&ft_face->glyph->outline, &transMatTategaki);
 
+#ifdef FT_LCD_FILTER_H
             if ( pFT_Library_SetLcdFilter )
                 pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
+#endif
+
             pFT_Render_Glyph (ft_face->glyph, render_mode);
 
             src = ft_face->glyph->bitmap.buffer;
@@ -7434,9 +7441,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 
         break;
       }
-#else
-      return GDI_ERROR;
-#endif
 
     case GGO_NATIVE:
       {
