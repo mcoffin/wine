@@ -175,6 +175,7 @@ struct makefile
     const char     *top_src_dir;
     const char     *top_obj_dir;
     const char     *parent_dir;
+    const char     *parent_spec;
     const char     *module;
     const char     *testdll;
     const char     *sharedlib;
@@ -1660,7 +1661,7 @@ static const char *get_make_variable( const struct makefile *make, const char *n
 static char *get_expanded_make_variable( const struct makefile *make, const char *name )
 {
     const char *var;
-    char *p, *end, *expand, *tmp;
+    char *p, *end, *expand, *tmp = NULL;
 
     var = get_make_variable( make, name );
     if (!var) return NULL;
@@ -3035,7 +3036,12 @@ static void output_module( struct makefile *make )
     unsigned int i;
 
     if (!make->appmode.count)
-        spec_file = src_dir_path( make, replace_extension( make->module, ".dll", ".spec" ));
+    {
+        if (!make->parent_spec)
+            spec_file = src_dir_path( make, replace_extension( make->module, ".dll", ".spec" ));
+        else
+            spec_file = src_dir_path( make, make->parent_spec );
+    }
     strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->delayimports, 0 ));
     strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->imports, 0 ));
     add_import_libs( make, &dep_libs, get_default_imports( make ), 0 );  /* dependencies only */
@@ -3954,6 +3960,7 @@ static void load_sources( struct makefile *make )
     strarray_set_value( &make->vars, "srcdir", src_dir_path( make, "" ));
 
     make->parent_dir    = get_expanded_make_variable( make, "PARENTSRC" );
+    make->parent_spec   = get_expanded_make_variable( make, "PARENTSPEC" );
     make->module        = get_expanded_make_variable( make, "MODULE" );
     make->testdll       = get_expanded_make_variable( make, "TESTDLL" );
     make->sharedlib     = get_expanded_make_variable( make, "SHAREDLIB" );

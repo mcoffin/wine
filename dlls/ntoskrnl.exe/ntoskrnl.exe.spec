@@ -1,14 +1,14 @@
-@ stub ExAcquireFastMutexUnsafe
+@ stdcall -norelay ExAcquireFastMutexUnsafe(ptr)
 @ stub ExAcquireRundownProtection
 @ stub ExAcquireRundownProtectionEx
 @ stub ExInitializeRundownProtection
 @ stub ExInterlockedAddLargeStatistic
 @ stub ExInterlockedCompareExchange64
 @ stub ExInterlockedFlushSList
-@ stub ExInterlockedPopEntrySList
+@ stdcall -norelay ExInterlockedPopEntrySList(ptr ptr) NTOSKRNL_ExInterlockedPopEntrySList
 @ stub ExInterlockedPushEntrySList
 @ stub ExReInitializeRundownProtection
-@ stub ExReleaseFastMutexUnsafe
+@ stdcall -norelay ExReleaseFastMutexUnsafe(ptr)
 @ stub ExReleaseResourceLite
 @ stub ExReleaseRundownProtection
 @ stub ExReleaseRundownProtectionEx
@@ -381,7 +381,7 @@
 @ stub IoGetBootDiskInformation
 @ stdcall IoGetConfigurationInformation()
 @ stdcall IoGetCurrentProcess()
-@ stub IoGetDeviceAttachmentBaseRef
+@ stdcall IoGetDeviceAttachmentBaseRef(ptr)
 @ stub IoGetDeviceInterfaceAlias
 @ stdcall IoGetDeviceInterfaces(ptr ptr long ptr)
 @ stdcall IoGetDeviceObjectPointer(ptr long ptr ptr)
@@ -434,7 +434,7 @@
 @ stub IoRegisterLastChanceShutdownNotification
 @ stdcall IoRegisterPlugPlayNotification(long long ptr ptr ptr ptr ptr)
 @ stdcall IoRegisterShutdownNotification(ptr)
-@ stdcall IoReleaseCancelSpinLock(ptr)
+@ stdcall IoReleaseCancelSpinLock(long)
 @ stub IoReleaseRemoveLockAndWaitEx
 @ stub IoReleaseRemoveLockEx
 @ stub IoReleaseVpbSpinLock
@@ -693,7 +693,7 @@
 @ stub MmLockPagableImageSection
 @ stdcall MmLockPagableSectionByHandle(ptr)
 @ stdcall MmMapIoSpace(int64 long long)
-@ stub MmMapLockedPages
+@ stdcall MmMapLockedPages(ptr long)
 @ stdcall MmMapLockedPagesSpecifyCache(ptr long long ptr long long)
 @ stub MmMapLockedPagesWithReservedMapping
 @ stub MmMapMemoryDumpMdl
@@ -723,7 +723,7 @@
 @ stdcall MmUnlockPagableImageSection(ptr)
 @ stdcall MmUnlockPages(ptr)
 @ stdcall MmUnmapIoSpace(ptr long)
-@ stub MmUnmapLockedPages
+@ stdcall MmUnmapLockedPages(ptr ptr)
 @ stub MmUnmapReservedMapping
 @ stub MmUnmapVideoDisplay
 @ stub MmUnmapViewInSessionSpace
@@ -740,9 +740,9 @@
 @ stdcall NtAddAtom(ptr long ptr)
 @ stdcall NtAdjustPrivilegesToken(long long ptr long ptr ptr)
 @ stdcall NtAllocateLocallyUniqueId(ptr)
-@ stdcall NtAllocateUuids(ptr ptr ptr)
+@ stdcall NtAllocateUuids(ptr ptr ptr ptr)
 @ stdcall NtAllocateVirtualMemory(long ptr long ptr long long)
-@ stub NtBuildNumber
+@ extern NtBuildNumber
 @ stdcall NtClose(long)
 @ stdcall NtConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall NtCreateEvent(ptr long ptr long long)
@@ -815,7 +815,7 @@
 @ stub ObQueryObjectAuditingByHandle
 @ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
 @ stdcall ObReferenceObjectByName(ptr long ptr long ptr long ptr ptr)
-@ stub ObReferenceObjectByPointer
+@ stdcall ObReferenceObjectByPointer(ptr long ptr long)
 @ stub ObReferenceSecurityDescriptor
 @ stub ObReleaseObjectSecurity
 @ stub ObSetHandleAttributes
@@ -1088,7 +1088,7 @@
 @ stub RtlIpv6AddressToStringW
 @ stub RtlIpv6StringToAddressA
 @ stub RtlIpv6StringToAddressExA
-@ stub RtlIpv6StringToAddressExW
+@ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr) ntdll.RtlIpv6StringToAddressExW
 @ stub RtlIpv6StringToAddressW
 @ stub RtlIsGenericTableEmpty
 @ stub RtlIsGenericTableEmptyAvl
@@ -1402,14 +1402,14 @@
 @ cdecl -private -arch=i386 _CIsqrt() msvcrt._CIsqrt
 @ cdecl -private _abnormal_termination() msvcrt._abnormal_termination
 @ stdcall -private -arch=i386 -ret64 _alldiv(int64 int64)
-@ stub _alldvrm
+@ stdcall -private -arch=i386 -norelay _alldvrm(int64 int64)
 @ stdcall -private -arch=i386 -ret64 _allmul(int64 int64)
 @ stdcall -private -arch=i386 -norelay _alloca_probe()
 @ stdcall -private -arch=i386 -ret64 _allrem(int64 int64)
 @ stdcall -private -arch=i386 -ret64 _allshl(int64 long)
 @ stdcall -private -arch=i386 -ret64 _allshr(int64 long)
 @ stdcall -private -arch=i386 -ret64 _aulldiv(int64 int64)
-@ stub _aulldvrm
+@ stdcall -private -arch=i386 -norelay _aulldvrm(int64 int64)
 @ stdcall -private -arch=i386 -ret64 _aullrem(int64 int64)
 @ stdcall -private -arch=i386 -ret64 _aullshr(int64 long)
 @ cdecl -private -arch=i386 _except_handler2(ptr ptr ptr ptr) msvcrt._except_handler2

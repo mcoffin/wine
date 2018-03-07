@@ -56,6 +56,7 @@ AC_ARG_WITH(gsm,       AS_HELP_STRING([--without-gsm],[do not use libgsm (GSM 06
             [if test "x$withval" = "xno"; then ac_cv_header_gsm_h=no; ac_cv_header_gsm_gsm_h=no; fi])
 AC_ARG_WITH(gssapi,    AS_HELP_STRING([--without-gssapi],[do not use GSSAPI (Kerberos SSP support)]))
 AC_ARG_WITH(gstreamer, AS_HELP_STRING([--without-gstreamer],[do not use GStreamer (codecs support)]))
+AC_ARG_WITH(gtk3,      AS_HELP_STRING([--without-gtk3],[do not use gtk3 (gtk3 theming support)]))
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]))
 AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerberos)]))
@@ -82,6 +83,7 @@ AC_ARG_WITH(tiff,      AS_HELP_STRING([--without-tiff],[do not use TIFF]))
 AC_ARG_WITH(udev,      AS_HELP_STRING([--without-udev],[do not use udev (plug and play support)]))
 AC_ARG_WITH(v4l,       AS_HELP_STRING([--without-v4l],[do not use v4l1 (v4l support)]))
 AC_ARG_WITH(vulkan,    AS_HELP_STRING([--without-vulkan],[do not use Vulkan]))
+AC_ARG_WITH(xattr,     AS_HELP_STRING([--without-xattr],[do not use xattr (security attributes support)]))
 AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xcomposite_h=no; fi])
 AC_ARG_WITH(xcursor,   AS_HELP_STRING([--without-xcursor],[do not use the Xcursor extension]),
@@ -108,6 +110,8 @@ AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree vide
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; ac_cv_header_X11_extensions_xf86vmproto_h=no; fi])
 AC_ARG_WITH(zlib,      AS_HELP_STRING([--without-zlib],[do not use Zlib (data compression)]),
             [if test "x$withval" = "xno"; then ac_cv_header_zlib_h=no; fi])
+AC_ARG_WITH(va,        AS_HELP_STRING([--without-va],[do not use VA (GPU video acceleration)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_va_va_x11_h=no; fi])
 
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
 AC_ARG_WITH(wine64,    AS_HELP_STRING([--with-wine64=DIR],[use the 64-bit Wine in DIR for a Wow64 build]))
@@ -213,6 +217,12 @@ esac
 dnl enable_win16 defaults to yes on x86, to no on other CPUs
 enable_win16=${enable_win16:-no}
 enable_win64=${enable_win64:-no}
+if test "x$enable_win64" != "xyes"
+then
+  enable_win32="yes"
+else
+  enable_win32="no"
+fi
 
 dnl Disable winetest too if tests are disabled
 enable_winetest=${enable_winetest:-$enable_tests}
@@ -700,6 +710,20 @@ AC_CHECK_HEADERS([libprocstat.h],,,
 #include <sys/socket.h>
 #endif])
 
+if test "x$with_xattr" != "xno"
+then
+    AC_CHECK_HEADERS(attr/xattr.h sys/extattr.h, [HAVE_XATTR=1])
+    AC_CHECK_HEADERS(sys/xattr.h, [HAVE_XATTR=1]
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/xattr.h>]], [[getxattr("", "", "", 0, 0, 0);]])],
+            [AC_DEFINE(XATTR_ADDITIONAL_OPTIONS, 1, [Define if xattr functions take additional arguments (Mac OS X)])])])
+fi
+if test "x$with_xattr" = "xyes"
+then
+    WINE_ERROR_WITH(xattr,[test "x$HAVE_XATTR" = "x"],[xattr ${notice_platform}development files \
+not found. Wine will be built without extended attribute support, which probably isn't what you \
+want. You will need to install ${notice_platform}development packages of libattr at the very least.])
+fi
+
 dnl **** Check for working dll ****
 
 AC_SUBST(DLLFLAGS,"-D_REENTRANT")
@@ -707,6 +731,7 @@ AC_SUBST(LDRPATH_INSTALL,"")
 AC_SUBST(LDRPATH_LOCAL,"")
 AC_SUBST(LDEXECFLAGS,"")
 AC_SUBST(WINELOADER_LDFLAGS,"")
+AC_SUBST(WINEPRELOADER_LDFLAGS,"")
 LIBEXT="so"
 DLLEXT=".so"
 IMPLIBEXT="def"
@@ -765,9 +790,17 @@ case $host_os in
     AC_SUBST(APPLICATIONSERVICES_LIBS,"-framework ApplicationServices")
     AC_SUBST(CORESERVICES_LIBS,"-framework CoreServices")
     AC_SUBST(APPKIT_LIBS,"-framework AppKit")
-    WINELOADER_LDFLAGS="-image_base 0x7bf00000 -Wl,-pagezero_size,0x1000,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
+
+    WINELOADER_LDFLAGS="-Wl,-pie,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
+    WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
+                    [WINELOADER_LDFLAGS="-Wl,--export-dynamic $WINELOADER_LDFLAGS"])
+
+    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7c400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
+    WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main],
+                    [WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"])
     WINE_TRY_CFLAGS([-Wl,-no_pie],
-                    [WINELOADER_LDFLAGS="-Wl,-no_pie $WINELOADER_LDFLAGS"])
+                    [WINEPRELOADER_LDFLAGS="-Wl,-no_pie $WINEPRELOADER_LDFLAGS"])
+
     if test "$ac_cv_header_DiskArbitration_DiskArbitration_h" = "yes"
     then
         dnl DiskArbitration API is not public on Darwin < 8.0, use it only if header found
@@ -880,6 +913,7 @@ case $host_os in
     enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [WINELOADER_LDFLAGS="-Wl,--export-dynamic"])
+    WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000"
     WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
                     [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                      LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
@@ -927,12 +961,13 @@ case $host_os in
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                       [WINELOADER_LDFLAGS="-Wl,--export-dynamic"])
+      WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000"
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`:\$(DESTDIR)\${libdir}"
                        LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
           [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`:\$(DESTDIR)\${libdir}"
                             LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
       WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
@@ -1211,6 +1246,21 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
     WINE_WARNING_WITH(opengl,[test -n "$opengl_msg"],[$opengl_msg
 OpenGL and Direct3D won't be supported.])
 
+    dnl **** Check for libva ****
+    AC_CHECK_HEADERS([va/va_x11.h va/va_drm.h])
+    if test "$ac_cv_header_va_va_x11_h" = "yes" -a "$ac_cv_header_va_va_drm_h" = "yes"
+    then
+        WINE_CHECK_SONAME(va,vaQuerySurfaceAttributes,,,[$X_LIBS])
+        WINE_CHECK_SONAME(va-x11,vaGetDisplay,,,[$X_LIBS -lva])
+        WINE_CHECK_SONAME(va-drm,vaGetDisplayDRM,,,[$X_LIBS -lva])
+        if test "x$ac_cv_lib_soname_va" != "x" -a "x$ac_cv_lib_soname_va_x11" != "x" -a "x$ac_cv_lib_soname_va_drm" != "x"
+        then
+            AC_DEFINE(HAVE_VAAPI, 1, [Define if you have the libva development files])
+        fi
+    fi
+    WINE_NOTICE_WITH(va,[test "x$ac_cv_lib_soname_va" = "x" -o "x$ac_cv_lib_soname_va_x11" = "x" -o "x$ac_cv_lib_soname_va_drm" = "x"],
+                     [libva ${notice_platform}development files not found, GPU video acceleration won't be supported.])
+
     CPPFLAGS="$ac_save_CPPFLAGS"
 else
     X_CFLAGS=""
@@ -1242,9 +1292,9 @@ WINE_NOTICE_WITH(opencl,[test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" != xyes],
 dnl **** Check for libpcap ****
 if test "$ac_cv_header_pcap_pcap_h" = "yes"
 then
-    AC_CHECK_LIB(pcap,pcap_create,[AC_SUBST(PCAP_LIBS,["-lpcap"])])
+    WINE_CHECK_SONAME(pcap,pcap_create,,,)
 fi
-WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_pcap_pcap_create" != xyes],
+WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_soname_pcap" = "x"],
                  [pcap ${notice_platform}development files not found, wpcap won't be supported.],
                  [enable_wpcap])
 
@@ -1441,6 +1491,26 @@ then
 fi
 WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms2_cmsOpenProfileFromFile" != "yes"],
                  [liblcms2 ${notice_platform}development files not found, Color Management won't be supported.])
+
+dnl **** Check for GTK3 ****
+if test "x$with_gtk3" != "xno";
+then
+    WINE_PACKAGE_INCLUDE_FLAGS(GTK3, [gtk+-3.0],,
+        [AC_CHECK_HEADERS([gtk/gtk.h])
+        if test "$ac_cv_header_gtk_gtk_h" = "yes"
+        then
+            WINE_CHECK_SONAME(gobject-2.0,g_object_unref,
+                [WINE_CHECK_SONAME(cairo,cairo_destroy,
+                    [WINE_CHECK_SONAME(gtk-3,gtk_style_context_save,
+                            [AC_DEFINE(HAVE_GTK3, 1, [Define if GTK 3 is installed])])])])
+            test "x$ac_cv_lib_soname_gtk_3" != "x" || GTK3_CFLAGS=""
+        else
+            GTK3_CFLAGS=""
+        fi])
+fi
+WINE_NOTICE_WITH(gtk3,[test "x$ac_cv_lib_soname_gtk_3" = x],
+                 [GTK3 ${notice_platform}development files not found, GTK themes won't be supported.])
+test "x$ac_cv_lib_soname_gtk_3" != "x" || enable_uxtheme_gtk=${enable_uxtheme_gtk:-no}
 
 dnl **** Check for FreeType 2 ****
 if test "x$with_freetype" != "xno"
@@ -1737,6 +1807,9 @@ then
 fi
 WINE_NOTICE_WITH(tiff,[test "x$ac_cv_lib_soname_tiff" = "x"],
                  [libtiff ${notice_platform}development files not found, TIFF won't be supported.])
+
+dnl **** Check for libtxc_dxtn ****
+WINE_CHECK_SONAME(txc_dxtn,tx_compress_dxtn,,,,[[libtxc_dxtn\\(_s2tc\\)\\{0,1\\}]])
 
 dnl **** Check for mpg123 ****
 if test "x$with_mpg123" != "xno"
@@ -2084,6 +2157,14 @@ case $host_os in
   linux*)
     case $host_cpu in
       *i[[3456789]]86*|x86_64*|*aarch64*)
+        test "$wine_binary" = wine || WINE_IGNORE_FILE("loader/wine-preloader")
+        WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
+        ;;
+    esac
+    ;;
+  darwin*|macosx*)
+    case $host_cpu in
+      *i[[3456789]]86*|x86_64*)
         test "$wine_binary" = wine || WINE_IGNORE_FILE("loader/wine-preloader")
         WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
         ;;
@@ -2735,6 +2816,15 @@ then
     AC_DEFINE(HAVE___BUILTIN_CLZ, 1, [Define to 1 if you have the `__builtin_clz' built-in function.])
 fi
 
+dnl Check for __builtin_ctzl
+AC_CACHE_CHECK([for __builtin_ctzl], ac_cv_have___builtin_ctzl,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM(,[[return __builtin_ctzl(1)]])],
+               [ac_cv_have___builtin_ctzl="yes"], [ac_cv_have___builtin_ctzl="no"]))
+if test "$ac_cv_have___builtin_ctzl" = "yes"
+then
+    AC_DEFINE(HAVE___BUILTIN_CTZL, 1, [Define to 1 if you have the `__builtin_ctzl' built-in function.])
+fi
+
 dnl Check for __builtin_popcount
 AC_CACHE_CHECK([for __builtin_popcount], ac_cv_have___builtin_popcount,
                AC_LINK_IFELSE([AC_LANG_PROGRAM(,[[return __builtin_popcount(1)]])],
@@ -2991,7 +3081,9 @@ WINE_CONFIG_DLL(api-ms-win-ntuser-rectangle-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-perf-legacy-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-power-base-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-power-setting-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-rtcore-ntuser-draw-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-rtcore-ntuser-private-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-rtcore-ntuser-window-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-security-activedirectoryclient-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-security-audit-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-security-base-l1-1-0)
@@ -3014,7 +3106,10 @@ WINE_CONFIG_DLL(api-ms-win-service-management-l2-1-0)
 WINE_CONFIG_DLL(api-ms-win-service-private-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-service-winsvc-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-service-winsvc-l1-2-0)
+WINE_CONFIG_DLL(api-ms-win-shcore-obsolete-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-shcore-scaling-l1-1-1)
+WINE_CONFIG_DLL(api-ms-win-shcore-stream-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-shcore-thread-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-shell-shellcom-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-shell-shellfolders-l1-1-0)
 WINE_CONFIG_DLL(apphelp)
@@ -3219,13 +3314,17 @@ WINE_CONFIG_LIB(dxerr8)
 WINE_CONFIG_LIB(dxerr9)
 WINE_CONFIG_DLL(dxgi)
 WINE_CONFIG_TEST(dlls/dxgi/tests)
+WINE_CONFIG_DLL(dxgkrnl.sys)
+WINE_CONFIG_DLL(dxgmms1.sys)
 WINE_CONFIG_LIB(dxguid)
 WINE_CONFIG_DLL(dxva2)
+WINE_CONFIG_TEST(dlls/dxva2/tests)
 WINE_CONFIG_DLL(esent)
 WINE_CONFIG_DLL(evr)
 WINE_CONFIG_TEST(dlls/evr/tests)
 WINE_CONFIG_DLL(explorerframe)
 WINE_CONFIG_TEST(dlls/explorerframe/tests)
+WINE_CONFIG_DLL(ext-ms-win-appmodel-usercontext-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-authz-context-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-domainjoin-netjoin-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-gdi-dc-create-l1-1-1)
@@ -3236,6 +3335,7 @@ WINE_CONFIG_DLL(ext-ms-win-gdi-render-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-kernel32-package-current-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-kernel32-package-l1-1-1)
 WINE_CONFIG_DLL(ext-ms-win-ntuser-message-l1-1-1)
+WINE_CONFIG_DLL(ext-ms-win-ntuser-mouse-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-ntuser-private-l1-1-1)
 WINE_CONFIG_DLL(ext-ms-win-ntuser-rectangle-ext-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-ntuser-uicontext-ext-l1-1-0)
@@ -3246,11 +3346,15 @@ WINE_CONFIG_DLL(ext-ms-win-rtcore-gdi-object-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-rtcore-gdi-rgn-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-rtcore-ntuser-dc-access-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-rtcore-ntuser-dpi-l1-1-0)
+WINE_CONFIG_DLL(ext-ms-win-rtcore-ntuser-syscolors-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-rtcore-ntuser-sysparams-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-security-credui-l1-1-0)
 WINE_CONFIG_DLL(ext-ms-win-security-cryptui-l1-1-0)
+WINE_CONFIG_DLL(ext-ms-win-uxtheme-themes-l1-1-0)
+WINE_CONFIG_DLL(ext-ms-win-xaml-pal-l1-1-0)
 WINE_CONFIG_DLL(faultrep)
 WINE_CONFIG_TEST(dlls/faultrep/tests)
+WINE_CONFIG_DLL(feclient)
 WINE_CONFIG_DLL(fltlib)
 WINE_CONFIG_DLL(fltmgr.sys)
 WINE_CONFIG_DLL(fntcache)
@@ -3284,6 +3388,7 @@ WINE_CONFIG_DLL(icmp)
 WINE_CONFIG_DLL(ieframe)
 WINE_CONFIG_TEST(dlls/ieframe/tests)
 WINE_CONFIG_DLL(ieproxy)
+WINE_CONFIG_DLL(iertutil)
 WINE_CONFIG_DLL(ifsmgr.vxd,enable_win16)
 WINE_CONFIG_DLL(imaadp32.acm)
 WINE_CONFIG_DLL(imagehlp)
@@ -3476,6 +3581,14 @@ WINE_CONFIG_TEST(dlls/ntdsapi/tests)
 WINE_CONFIG_DLL(ntoskrnl.exe)
 WINE_CONFIG_DLL(ntprint)
 WINE_CONFIG_TEST(dlls/ntprint/tests)
+WINE_CONFIG_DLL(nvapi,enable_win32)
+WINE_CONFIG_TEST(dlls/nvapi/tests)
+WINE_CONFIG_DLL(nvapi64,enable_win64)
+WINE_CONFIG_DLL(nvcuda)
+WINE_CONFIG_TEST(dlls/nvcuda/tests)
+WINE_CONFIG_DLL(nvcuvid)
+WINE_CONFIG_DLL(nvencodeapi,enable_win32)
+WINE_CONFIG_DLL(nvencodeapi64,enable_win64)
 WINE_CONFIG_DLL(objsel)
 WINE_CONFIG_DLL(odbc32)
 WINE_CONFIG_DLL(odbccp32)
@@ -3637,6 +3750,7 @@ WINE_CONFIG_TEST(dlls/userenv/tests)
 WINE_CONFIG_DLL(usp10)
 WINE_CONFIG_TEST(dlls/usp10/tests)
 WINE_CONFIG_LIB(uuid)
+WINE_CONFIG_DLL(uxtheme-gtk)
 WINE_CONFIG_DLL(uxtheme)
 WINE_CONFIG_TEST(dlls/uxtheme/tests)
 WINE_CONFIG_DLL(vbscript)
@@ -3677,6 +3791,7 @@ WINE_CONFIG_DLL(wiaservc)
 WINE_CONFIG_TEST(dlls/wiaservc/tests)
 WINE_CONFIG_DLL(wimgapi)
 WINE_CONFIG_DLL(win32s16.dll16,enable_win16)
+WINE_CONFIG_DLL(win32k.sys)
 WINE_CONFIG_DLL(win87em.dll16,enable_win16)
 WINE_CONFIG_DLL(winaspi.dll16,enable_win16)
 WINE_CONFIG_DLL(windebug.dll16,enable_win16)
@@ -3689,7 +3804,8 @@ WINE_CONFIG_DLL(wineandroid.drv)
 WINE_CONFIG_DLL(winebus.sys)
 WINE_CONFIG_DLL(winecoreaudio.drv)
 WINE_CONFIG_LIB(winecrt0)
-WINE_CONFIG_DLL(wined3d)
+WINE_CONFIG_DLL(wined3d-csmt)
+WINE_CONFIG_DLL(wined3d,,[implib])
 WINE_CONFIG_DLL(winegstreamer)
 WINE_CONFIG_DLL(winehid.sys)
 WINE_CONFIG_DLL(winejoystick.drv)
@@ -3824,6 +3940,7 @@ WINE_CONFIG_PROGRAM(ipconfig)
 WINE_CONFIG_PROGRAM(lodctr)
 WINE_CONFIG_PROGRAM(mofcomp)
 WINE_CONFIG_PROGRAM(mshta)
+WINE_CONFIG_PROGRAM(msidb)
 WINE_CONFIG_PROGRAM(msiexec)
 WINE_CONFIG_PROGRAM(msinfo32)
 WINE_CONFIG_PROGRAM(net)
@@ -3845,6 +3962,7 @@ WINE_CONFIG_TEST(programs/regedit/tests)
 WINE_CONFIG_PROGRAM(regsvcs)
 WINE_CONFIG_PROGRAM(regsvr32)
 WINE_CONFIG_PROGRAM(rpcss)
+WINE_CONFIG_PROGRAM(runas)
 WINE_CONFIG_PROGRAM(rundll.exe16,enable_win16)
 WINE_CONFIG_PROGRAM(rundll32)
 WINE_CONFIG_PROGRAM(sc)
@@ -3892,6 +4010,7 @@ WINE_CONFIG_PROGRAM(wordpad)
 WINE_CONFIG_PROGRAM(write)
 WINE_CONFIG_PROGRAM(wscript)
 WINE_CONFIG_TEST(programs/wscript/tests)
+WINE_CONFIG_PROGRAM(wuauserv)
 WINE_CONFIG_PROGRAM(wusa)
 WINE_CONFIG_PROGRAM(xcopy)
 WINE_CONFIG_TEST(programs/xcopy/tests)

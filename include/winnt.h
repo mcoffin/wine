@@ -755,9 +755,17 @@ typedef struct _MEMORY_BASIC_INFORMATION
 #define UNICODE_STRING_MAX_CHARS 32767
 
 #define FIELD_OFFSET(type, field) ((LONG)offsetof(type, field))
+#define RTL_FIELD_SIZE(type, field) (sizeof(((type *)0)->field))
+#define RTL_SIZEOF_THROUGH_FIELD(type, field) (FIELD_OFFSET(type, field) + RTL_FIELD_SIZE(type, field))
 
-#define CONTAINING_RECORD(address, type, field) \
-  ((type *)((PCHAR)(address) - offsetof(type, field)))
+#ifdef __GNUC__
+# define CONTAINING_RECORD(address, type, field) ({     \
+   const typeof(((type *)0)->field) *__ptr = (address); \
+   (type *)((PCHAR)__ptr - offsetof(type, field)); })
+#else
+# define CONTAINING_RECORD(address, type, field) \
+   ((type *)((PCHAR)(address) - offsetof(type, field)))
+#endif
 
 /* Types */
 
@@ -3904,6 +3912,11 @@ typedef enum _TOKEN_INFORMATION_CLASS {
 					TOKEN_ADJUST_SESSIONID | \
 					TOKEN_ADJUST_DEFAULT )
 
+#define DISABLE_MAX_PRIVILEGE 0x1
+#define SANDBOX_INERT         0x2
+#define LUA_TOKEN             0x4
+#define WRITE_RESTRICTED      0x8
+
 #ifndef _SECURITY_DEFINED
 #define _SECURITY_DEFINED
 
@@ -5959,6 +5972,8 @@ typedef struct _GROUP_AFFINITY
     WORD Reserved[3];
 } GROUP_AFFINITY, *PGROUP_AFFINITY;
 
+#define ALL_PROCESSOR_GROUPS 0xffff
+
 typedef struct _PROCESSOR_NUMBER
 {
     WORD Group;
@@ -6120,8 +6135,28 @@ typedef VOID (CALLBACK *PTP_TIMER_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_TIME
 typedef VOID (CALLBACK *PTP_WAIT_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_WAIT,TP_WAIT_RESULT);
 typedef VOID (CALLBACK *PTP_WIN32_IO_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PVOID,ULONG,ULONG_PTR,PTP_IO);
 
-
 NTSYSAPI BOOLEAN NTAPI RtlGetProductInfo(DWORD,DWORD,DWORD,DWORD,PDWORD);
+
+typedef enum _RTL_UMS_THREAD_INFO_CLASS
+{
+    UmsThreadInvalidInfoClass,
+    UmsThreadUserContext,
+    UmsThreadPriority,
+    UmsThreadAffinity,
+    UmsThreadTeb,
+    UmsThreadIsSuspended,
+    UmsThreadIsTerminated,
+    UmsThreadMaxInfoClass
+} RTL_UMS_THREAD_INFO_CLASS, *PRTL_UMS_THREAD_INFO_CLASS;
+
+typedef enum _RTL_UMS_SCHEDULER_REASON
+{
+    UmsSchedulerStartup,
+    UmsSchedulerThreadBlocked,
+    UmsSchedulerThreadYield,
+} RTL_UMS_SCHEDULER_REASON, *PRTL_UMS_SCHEDULER_REASON;
+
+typedef void (CALLBACK *PRTL_UMS_SCHEDULER_ENTRY_POINT)(RTL_UMS_SCHEDULER_REASON,ULONG_PTR,PVOID);
 
 #ifdef __cplusplus
 }
